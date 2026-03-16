@@ -3,14 +3,19 @@ package postgres
 import (
 	"context"
 	"notification-system/internal/domain/models"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type NotificationRepository struct {
-	// later we will add DB connection here
+	db *pgxpool.Pool
 }
 
-func (r *NotificationRepository) CreateNotification(ctx context.Context, notification models.Notification) error {
-	// SQL query will come here later
+func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
+	return &NotificationRepository{db: db}
+}
+
+func (r *NotificationRepository) CreateNotification(ctx context.Context, n models.Notification) error {
 	return nil
 }
 
@@ -19,10 +24,10 @@ func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id str
 	return notification, nil
 }
 
-func (r *NotificationRepository) UpdateDeliveryStatus(ctx context.Context, id string, status string) error {
+func (r *NotificationRepository) UpdateDeliveryStatus(ctx context.Context, deliveryID string, status string) error {
 	return nil
 }
 
-func (r *NotificationRepository) CreateDeliveryRecord(ctx context.Context, delivery models.Delivery) error {
+func (r *NotificationRepository) CreateDeliveryRecord(ctx context.Context, d models.Delivery) error {
 	return nil
 }

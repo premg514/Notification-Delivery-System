@@ -8,5 +8,5 @@ type Delivery struct {
 	NotificationID string
 	Status         string
 	RetryCount     int
-	DeliveredAt    time.Time
+	DeliveredAt    *time.Time
 }

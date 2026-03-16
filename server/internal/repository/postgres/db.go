@@ -1,9 +1,19 @@
 package postgres
 
 import (
-	"fmt"
+	"context"
+	"os"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestConnection() {
-	fmt.Println("Postgres connection placeholder")
-};
+func NewDB() (*pgxpool.Pool, error) {
+	databaseURL := os.Getenv("POSTGRES_URL")
+
+	dbpool, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return dbpool, nil
+}

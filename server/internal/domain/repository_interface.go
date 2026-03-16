@@ -1,9 +1,13 @@
 package domain
 
-import "notification-system/internal/domain/models"
+import (
+	"context"
+	"notification-system/internal/domain/models"
+)
 
 type NotificationRepository interface {
-	CreateNotification(notification models.Notification) error
-	GetNotificationByID(id string) (models.Notification, error)
-	UpdateDeliveryStatus(id string, status string) error
+	CreateNotification(ctx context.Context, n models.Notification) error
+	GetNotificationByID(ctx context.Context, id string) (models.Notification, error)
+	UpdateDeliveryStatus(ctx context.Context, deliveryID string, status string) error
+	CreateDeliveryRecord(ctx context.Context, d models.Delivery) error
 }
