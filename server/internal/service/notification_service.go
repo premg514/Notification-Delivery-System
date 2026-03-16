@@ -17,3 +17,7 @@ func NewNotificationService(repo domain.NotificationRepository) *NotificationSer
 func (s *NotificationService) CreateNotification(ctx context.Context, n models.Notification) error {
 	return s.repo.CreateNotification(ctx, n)
 }
+
+func (s *NotificationService) GetNotification(ctx context.Context, id string) (models.Notification, error) {
+	return s.repo.GetNotificationByID(ctx, id)
+}
