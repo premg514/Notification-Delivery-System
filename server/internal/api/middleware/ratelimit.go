@@ -3,7 +3,10 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
+
+	"notification-system/internal/observability"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -60,12 +63,15 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		allowed, err := rl.allow(c.Request.Context(), rl.keyFor(c.ClientIP()))
 		if err != nil {
+			observability.IncRateLimitErrors()
+			slog.Error("rate limiter unavailable", "error", err)
 			c.JSON(503, map[string]string{"error": "rate limiter unavailable"})
 			c.Abort()
 			return
 		}
 
 		if !allowed {
+			observability.IncRateLimitBlocked()
 			c.JSON(429, map[string]string{"error": "rate limit exceeded"})
 			c.Abort()
 			return

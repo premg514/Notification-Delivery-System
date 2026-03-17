@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -55,7 +57,7 @@ func (h *NotificationHandler) SendNotification(c *gin.Context) {
 		IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		handleServiceError(c, err)
 		return
 	}
 
@@ -69,4 +71,15 @@ func (h *NotificationHandler) SendNotification(c *gin.Context) {
 
 func (h *NotificationHandler) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleServiceError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		c.JSON(http.StatusGatewayTimeout, map[string]string{"error": "request timed out"})
+	case errors.Is(err, context.Canceled):
+		c.JSON(http.StatusRequestTimeout, map[string]string{"error": "request canceled"})
+	default:
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
 }

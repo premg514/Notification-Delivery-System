@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	Port                     string
+	LogLevel                 string
 	PostgresURL              string
 	RabbitMQURL              string
 	RedisURL                 string
@@ -35,6 +36,7 @@ func Load() Config {
 
 	return Config{
 		Port:                     getEnv("PORT", "8080"),
+		LogLevel:                 getEnv("LOG_LEVEL", "info"),
 		PostgresURL:              mustGetEnv("POSTGRES_URL"),
 		RabbitMQURL:              mustGetEnv("RABBITMQ_URL"),
 		RedisURL:                 getEnv("REDIS_URL", "redis://localhost:6379/0"),
