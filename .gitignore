@@ -1,4 +1,34 @@
 .env
-node_modules
 vendor
 *.log
+
+# Env files (secrets)
+.env
+server/.env
+
+# Go build outputs
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Coverage
+coverage.out
+*.coverprofile
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp

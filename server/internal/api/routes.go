@@ -1,16 +1,24 @@
 package api
 
 import (
-	"net/http"
-
 	"notification-system/internal/api/handlers"
 	"notification-system/internal/api/middleware"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func NewRouter(notificationHandler *handlers.NotificationHandler, rateLimiter *middleware.RateLimiter) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", notificationHandler.Health)
-	mux.HandleFunc("POST /send-notification", notificationHandler.SendNotification)
+func NewRouter(notificationHandler *handlers.NotificationHandler, rateLimiter *middleware.RateLimiter) *gin.Engine {
+	router := gin.New()
+	router.Use(middleware.Recovery())
+	router.Use(middleware.RequestLogger())
+	router.Use(middleware.Metrics())
+	router.GET("/health", notificationHandler.Health)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	return rateLimiter.Middleware(mux)
+	api := router.Group("/")
+	api.Use(rateLimiter.Middleware())
+	api.POST("/send-notification", notificationHandler.SendNotification)
+
+	return router
 }

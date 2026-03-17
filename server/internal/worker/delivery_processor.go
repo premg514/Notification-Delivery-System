@@ -3,9 +3,10 @@ package worker
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"notification-system/internal/domain"
 	"notification-system/internal/domain/models"
+	"notification-system/internal/observability"
 	"time"
 )
 
@@ -81,8 +82,9 @@ func (p *DeliveryProcessor) Process(ctx context.Context, job models.DeliveryBatc
 	}); err != nil {
 		return err
 	}
+	observability.AddDeliveryRetryScheduled(len(retryItems))
 
-	log.Printf("notification %s scheduled %d delivery retries for attempt %d", job.NotificationID, len(retryItems), retryNumber)
+	slog.Info("delivery retries scheduled", "notification_id", job.NotificationID, "retry_count", len(retryItems), "attempt", retryNumber)
 	return nil
 }
 
@@ -96,7 +98,7 @@ func (LoggingSender) Send(ctx context.Context, job models.DeliveryAttempt) error
 		if job.UserID == "" {
 			return errors.New("missing user id")
 		}
-		log.Printf("delivered delivery=%s user=%s priority=%s retry=%d", job.DeliveryID, job.UserID, job.Priority, job.RetryCount)
+		slog.Info("delivery sent", "delivery_id", job.DeliveryID, "user_id", job.UserID, "priority", job.Priority, "retry_count", job.RetryCount)
 		return nil
 	}
 }

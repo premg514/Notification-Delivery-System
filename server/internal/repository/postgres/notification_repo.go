@@ -99,13 +99,6 @@ func (r *NotificationRepository) CreateNotificationWithDeliveries(ctx context.Co
 
 // Fetch notification by ID
 func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id string) (models.Notification, error) {
-
-	query := `
-	SELECT id, title, message, created_at
-	FROM notifications
-	WHERE id = $1
-	`
-
 	var notification models.Notification
 	err := r.db.QueryRow(ctx, `
 		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at

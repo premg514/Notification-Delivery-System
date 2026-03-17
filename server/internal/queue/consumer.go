@@ -3,6 +3,9 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -59,16 +62,28 @@ func (c *Consumer[T]) Start(ctx context.Context) error {
 			return nil
 		case delivery, ok := <-deliveries:
 			if !ok {
-				return nil
+				if ctx.Err() != nil {
+					return nil
+				}
+				return fmt.Errorf("rabbitmq deliveries channel closed unexpectedly for queue %s", c.queueName)
 			}
 
 			var job T
 			if err := json.Unmarshal(delivery.Body, &job); err != nil {
+				slog.Warn("invalid message payload rejected",
+					"queue", c.queueName,
+					"delivery_tag", delivery.DeliveryTag,
+					"error", err,
+				)
 				_ = delivery.Reject(false)
 				continue
 			}
 
 			if err := c.pool.Submit(ctx, Task[T]{Envelope: delivery, Job: job}); err != nil {
+				if errors.Is(err, context.Canceled) {
+					_ = delivery.Nack(false, true)
+					return nil
+				}
 				_ = delivery.Nack(false, true)
 				return err
 			}
