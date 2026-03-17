@@ -1,96 +1,90 @@
 package middleware
 
 import (
-	"net"
-	"net/http"
-	"sync"
+	"context"
+	"fmt"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
-type visitor struct {
-	count     int
-	windowEnd time.Time
-}
-
 type RateLimiter struct {
-	limit int
-	mu    sync.Mutex
-	store map[string]*visitor
+	limit  int64
+	window time.Duration
+	client *redis.Client
+	script *redis.Script
 }
 
-func NewRateLimiter(limit int) *RateLimiter {
-	rl := &RateLimiter{
-		limit: limit,
-		store: make(map[string]*visitor),
+func NewRateLimiter(limit int, redisURL string) (*RateLimiter, error) {
+	if limit <= 0 {
+		limit = 1
 	}
 
-	go rl.cleanupLoop()
+	options, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, err
+	}
+	client := redis.NewClient(options)
 
-	return rl
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+
+	return &RateLimiter{
+		limit:  int64(limit),
+		window: time.Minute,
+		client: client,
+		script: redis.NewScript(`
+local current = redis.call("INCR", KEYS[1])
+if current == 1 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return current
+`),
+	}, nil
 }
 
-func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !rl.allow(clientIP(r)) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
+func (rl *RateLimiter) Close() error {
+	if rl.client == nil {
+		return nil
+	}
+	return rl.client.Close()
+}
+
+func (rl *RateLimiter) Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		allowed, err := rl.allow(c.Request.Context(), rl.keyFor(c.ClientIP()))
+		if err != nil {
+			c.JSON(503, map[string]string{"error": "rate limiter unavailable"})
+			c.Abort()
 			return
 		}
 
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (rl *RateLimiter) allow(key string) bool {
-	now := time.Now()
-
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	entry, exists := rl.store[key]
-	if !exists || now.After(entry.windowEnd) {
-		rl.store[key] = &visitor{
-			count:     1,
-			windowEnd: now.Add(time.Minute),
+		if !allowed {
+			c.JSON(429, map[string]string{"error": "rate limit exceeded"})
+			c.Abort()
+			return
 		}
-		return true
-	}
 
-	if entry.count >= rl.limit {
-		return false
-	}
-
-	entry.count++
-	return true
-}
-
-func (rl *RateLimiter) cleanupLoop() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		now := time.Now()
-
-		rl.mu.Lock()
-		for key, entry := range rl.store {
-			if now.After(entry.windowEnd) {
-				delete(rl.store, key)
-			}
-		}
-		rl.mu.Unlock()
+		c.Next()
 	}
 }
 
-func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		return forwarded
-	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+func (rl *RateLimiter) allow(ctx context.Context, key string) (bool, error) {
+	current, err := rl.script.Run(ctx, rl.client, []string{key}, int(rl.window.Milliseconds())).Int64()
 	if err != nil {
-		return r.RemoteAddr
+		return false, err
 	}
 
-	return host
+	return current <= rl.limit, nil
+}
+
+func (rl *RateLimiter) keyFor(client string) string {
+	windowKey := time.Now().UTC().Unix() / int64(rl.window.Seconds())
+	return fmt.Sprintf("ratelimit:%s:%d", client, windowKey)
 }

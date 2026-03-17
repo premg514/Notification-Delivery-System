@@ -49,7 +49,11 @@ func main() {
 	repo := postgres.NewNotificationRepository(db)
 	notificationService := service.NewNotificationService(repo, publisher)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
-	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitPerMinute)
+	rateLimiter, err := middleware.NewRateLimiter(cfg.RateLimitPerMinute, cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("redis rate limiter setup failed: %v", err)
+	}
+	defer rateLimiter.Close()
 	router := api.NewRouter(notificationHandler, rateLimiter)
 
 	server := &http.Server{

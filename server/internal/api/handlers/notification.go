@@ -1,11 +1,12 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
 	"notification-system/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 type NotificationHandler struct {
@@ -17,38 +18,36 @@ type sendNotificationRequest struct {
 	Message       string   `json:"message"`
 	TargetUserIDs []string `json:"target_users"`
 	Priority      string   `json:"priority"`
-	RequestID     string   `json:"request_id"`
 }
 
 func NewNotificationHandler(service *service.NotificationService) *NotificationHandler {
 	return &NotificationHandler{service: service}
 }
 
-func (h *NotificationHandler) SendNotification(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-
+func (h *NotificationHandler) SendNotification(c *gin.Context) {
 	var req sendNotificationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON payload"})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON payload"})
 		return
 	}
 
 	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Message) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title and message are required"})
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "title and message are required"})
 		return
 	}
 
 	if len(req.TargetUserIDs) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target_users must contain at least one user"})
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "target_users must contain at least one user"})
 		return
 	}
 
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if idempotencyKey == "" {
-		idempotencyKey = strings.TrimSpace(req.RequestID)
+		c.JSON(http.StatusBadRequest, map[string]string{"error": "Idempotency-Key header is required"})
+		return
 	}
 
-	result, err := h.service.QueueNotification(r.Context(), service.CreateNotificationInput{
+	result, err := h.service.QueueNotification(c.Request.Context(), service.CreateNotificationInput{
 		Title:          req.Title,
 		Message:        req.Message,
 		TargetUserIDs:  req.TargetUserIDs,
@@ -56,7 +55,7 @@ func (h *NotificationHandler) SendNotification(w http.ResponseWriter, r *http.Re
 		IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -65,15 +64,9 @@ func (h *NotificationHandler) SendNotification(w http.ResponseWriter, r *http.Re
 		statusCode = http.StatusOK
 	}
 
-	writeJSON(w, statusCode, result)
+	c.JSON(statusCode, result)
 }
 
-func (h *NotificationHandler) Health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(payload)
+func (h *NotificationHandler) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

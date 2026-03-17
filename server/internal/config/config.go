@@ -14,6 +14,7 @@ type Config struct {
 	Port                     string
 	PostgresURL              string
 	RabbitMQURL              string
+	RedisURL                 string
 	FanoutQueueName          string
 	DeliveryQueueName        string
 	DeliveryRetryQueuePrefix string
@@ -36,6 +37,7 @@ func Load() Config {
 		Port:                     getEnv("PORT", "8080"),
 		PostgresURL:              mustGetEnv("POSTGRES_URL"),
 		RabbitMQURL:              mustGetEnv("RABBITMQ_URL"),
+		RedisURL:                 getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		FanoutQueueName:          getEnv("RABBITMQ_FANOUT_QUEUE", "notifications.fanout"),
 		DeliveryQueueName:        getEnv("RABBITMQ_DELIVERY_QUEUE", "notifications.delivery"),
 		DeliveryRetryQueuePrefix: getEnv("RABBITMQ_DELIVERY_RETRY_PREFIX", "notifications.delivery.retry"),
