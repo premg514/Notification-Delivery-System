@@ -18,6 +18,7 @@ func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 	return &NotificationRepository{db: db}
 }
 
+// Create a notification
 func (r *NotificationRepository) CreateNotification(ctx context.Context, n models.Notification) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
@@ -96,7 +97,15 @@ func (r *NotificationRepository) CreateNotificationWithDeliveries(ctx context.Co
 	return tx.Commit(ctx)
 }
 
+// Fetch notification by ID
 func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id string) (models.Notification, error) {
+
+	query := `
+	SELECT id, title, message, created_at
+	FROM notifications
+	WHERE id = $1
+	`
+
 	var notification models.Notification
 	err := r.db.QueryRow(ctx, `
 		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at
@@ -133,6 +142,7 @@ func (r *NotificationRepository) GetNotificationByIdempotencyKey(ctx context.Con
 	return notification, err
 }
 
+// Update delivery status
 func (r *NotificationRepository) UpdateDeliveryStatus(ctx context.Context, deliveryID string, status string) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE deliveries
@@ -155,6 +165,7 @@ func (r *NotificationRepository) UpdateDeliveryStatusWithRetry(ctx context.Conte
 	return err
 }
 
+// Create delivery record
 func (r *NotificationRepository) CreateDeliveryRecord(ctx context.Context, d models.Delivery) error {
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO deliveries (id, user_id, notification_id, status, retry_count, delivered_at, last_error, updated_at)
