@@ -64,7 +64,7 @@ func (p *DeliveryProcessor) Process(ctx context.Context, job models.DeliveryBatc
 
 				item.RetryCount = nextRetry
 				retryItems = append(retryItems, item)
-				if updateErr := p.repo.UpdateDeliveryStatusWithRetry(ctx, item.DeliveryID, "retrying", nextRetry, nil, lastError); updateErr != nil {
+				if updateErr := p.repo.UpdateDeliveryStatusWithRetry(ctx, item.DeliveryID, "pending", nextRetry, nil, lastError); updateErr != nil {
 					return updateErr
 				}
 			}

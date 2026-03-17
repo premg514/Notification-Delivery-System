@@ -33,7 +33,6 @@ func main() {
 	log.Printf("Seeding %d users into the database...", userCount)
 
 	for i := 1; i <= userCount; i++ {
-
 		id := service.NewID()
 
 		email := fmt.Sprintf("user_%d_%s@example.com", i, id[:8])
@@ -45,12 +44,11 @@ func main() {
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (id) DO NOTHING
 		`, id, email, deviceToken, string(department), time.Now().UTC())
-
 		if err != nil {
 			log.Fatalf("failed to insert user %d: %v", i, err)
 		}
 	}
 
-	log.Println("✅ Successfully seeded 100 users!")
+	log.Printf("Successfully seeded %d users!", userCount)
 	log.Println("Check your database to grab a few UUIDs for testing.")
 }

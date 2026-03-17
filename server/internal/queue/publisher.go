@@ -12,9 +12,10 @@ import (
 )
 
 type Publisher struct {
-	channel *amqp.Channel
-	rabbit  *RabbitMQ
-	mu      sync.Mutex
+	channel       *amqp.Channel
+	rabbit        *RabbitMQ
+	confirmations chan amqp.Confirmation
+	mu            sync.Mutex
 }
 
 func NewPublisher(rabbit *RabbitMQ) (*Publisher, error) {
@@ -28,9 +29,12 @@ func NewPublisher(rabbit *RabbitMQ) (*Publisher, error) {
 		return nil, err
 	}
 
+	confirmations := channel.NotifyPublish(make(chan amqp.Confirmation, 1024))
+
 	return &Publisher{
-		channel: channel,
-		rabbit:  rabbit,
+		channel:       channel,
+		rabbit:        rabbit,
+		confirmations: confirmations,
 	}, nil
 }
 
@@ -62,7 +66,6 @@ func (p *Publisher) publishToQueue(ctx context.Context, queueName string, payloa
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	confirmations := p.channel.NotifyPublish(make(chan amqp.Confirmation, 1))
 	if err := p.channel.PublishWithContext(ctx, "", queueName, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
@@ -72,7 +75,7 @@ func (p *Publisher) publishToQueue(ctx context.Context, queueName string, payloa
 	}
 
 	select {
-	case confirmation := <-confirmations:
+	case confirmation := <-p.confirmations:
 		if !confirmation.Ack {
 			return fmt.Errorf("rabbitmq publish was not acknowledged for queue %s", queueName)
 		}

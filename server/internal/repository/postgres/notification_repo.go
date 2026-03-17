@@ -152,7 +152,21 @@ func (r *NotificationRepository) ListRecentNotifications(ctx context.Context, li
 			n.priority,
 			COALESCE(n.idempotency_key, ''),
 			n.created_at,
-			COUNT(d.id)::INT AS queued_deliveries
+			(
+				SELECT COUNT(*)::INT
+				FROM users u
+				WHERE u.department = n.target_department
+			) AS target_recipients,
+			CASE
+				WHEN COUNT(d.id)::INT > 0 THEN COUNT(d.id)::INT
+				ELSE (
+					SELECT COUNT(*)::INT
+					FROM users u
+					WHERE u.department = n.target_department
+				)
+			END AS queued_deliveries,
+			COUNT(*) FILTER (WHERE d.status = 'sent')::INT AS sent_deliveries,
+			COUNT(*) FILTER (WHERE d.status = 'pending')::INT AS pending_deliveries
 		FROM notifications n
 		LEFT JOIN deliveries d ON d.notification_id = n.id
 		GROUP BY n.id, n.title, n.message, n.target_department, n.priority, n.idempotency_key, n.created_at
@@ -175,7 +189,10 @@ func (r *NotificationRepository) ListRecentNotifications(ctx context.Context, li
 			&notification.Priority,
 			&notification.IdempotencyKey,
 			&notification.CreatedAt,
+			&notification.TargetRecipients,
 			&notification.QueuedDeliveries,
+			&notification.SentDeliveries,
+			&notification.PendingDeliveries,
 		); err != nil {
 			return nil, err
 		}

@@ -101,7 +101,7 @@ func (s *NotificationService) QueueNotification(ctx context.Context, input Creat
 
 	return CreateNotificationResult{
 		NotificationID:   notification.ID,
-		Status:           "sent",
+		Status:           "queue",
 		QueuedDeliveries: len(userIDs),
 		TargetDepartment: string(input.TargetDepartment),
 		CreatedAt:        notification.CreatedAt,
@@ -131,7 +131,7 @@ func (s *NotificationService) ListRecentNotifications(ctx context.Context, limit
 			Title:            notification.Title,
 			TargetDepartment: string(notification.TargetDepartment),
 			Priority:         notification.Priority,
-			Status:           "sent",
+			Status:           deriveNotificationStatus(notification),
 			CreatedAt:        notification.CreatedAt,
 			QueuedDeliveries: notification.QueuedDeliveries,
 		})
@@ -149,4 +149,20 @@ func normalizePriority(priority string) string {
 	default:
 		return "normal"
 	}
+}
+
+func deriveNotificationStatus(notification models.Notification) string {
+	if notification.QueuedDeliveries == 0 {
+		return "process"
+	}
+
+	if notification.PendingDeliveries > 0 {
+		return "queue"
+	}
+
+	if notification.SentDeliveries >= notification.QueuedDeliveries {
+		return "sent"
+	}
+
+	return "queue"
 }

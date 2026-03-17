@@ -13,7 +13,7 @@ import {
 type Priority = "high" | "normal" | "low";
 type Department = "CSE" | "ECE" | "ME" | "CIVIL" | "EEE";
 type HealthState = "healthy" | "degraded" | "offline";
-type ActivityStatus = "sent" | "duplicate" | "failed";
+type ActivityStatus = "process" | "queue" | "sent" | "duplicate" | "failed";
 
 type ActivityItem = {
   id: string;
@@ -51,10 +51,14 @@ function formatTime(date: Date): string {
 
 function getStatusClasses(status: ActivityStatus): string {
   switch (status) {
+    case "process":
+      return "bg-sky-50 text-sky-700";
+    case "queue":
+      return "bg-amber-50 text-amber-700";
     case "sent":
       return "bg-emerald-50 text-emerald-700";
     case "duplicate":
-      return "bg-amber-50 text-amber-700";
+      return "bg-violet-50 text-violet-700";
     case "failed":
       return "bg-rose-50 text-rose-700";
     default:
@@ -99,7 +103,11 @@ function buildActivityItemFromSuccess(
     department,
     recipients: result.queued_deliveries,
     priority,
-    status: result.duplicate ? "duplicate" : "sent",
+    status: result.duplicate
+      ? "duplicate"
+      : result.status === "process" || result.status === "queue" || result.status === "sent"
+        ? result.status
+        : "queue",
     detail: result.status,
   };
 }
@@ -114,7 +122,14 @@ function buildActivityItemFromRecentNotification(
     department: toDepartment(notification.target_department),
     recipients: notification.queued_deliveries,
     priority: toPriority(notification.priority),
-    status: notification.status === "failed" ? "failed" : "sent",
+    status:
+      notification.status === "process" ||
+      notification.status === "queue" ||
+      notification.status === "sent"
+        ? notification.status
+        : notification.status === "failed"
+          ? "failed"
+          : "queue",
     detail: notification.status,
   };
 }
@@ -198,9 +213,13 @@ export default function Dashboard(): JSX.Element {
     };
 
     void loadRecentNotifications();
+    const timerId = window.setInterval(() => {
+      void loadRecentNotifications();
+    }, 3000);
 
     return (): void => {
       mounted = false;
+      window.clearInterval(timerId);
     };
   }, []);
 
@@ -253,7 +272,9 @@ export default function Dashboard(): JSX.Element {
       setFlash(
         nextItem.status === "duplicate"
           ? `Existing idempotency key detected. ${department} reused the previous sent notification.`
-          : `${department} notification batch sent successfully.`,
+          : nextItem.status === "queue"
+            ? `${department} notification stored and pushed to queue successfully.`
+            : `${department} notification is being processed.`,
       );
       setTitle("");
       setMessage("");
@@ -480,8 +501,8 @@ export default function Dashboard(): JSX.Element {
                 Target department:{" "}
                 <span className="font-bold text-ink">{department}</span>
                 <span className="mt-2 block text-xs uppercase tracking-[0.25em] text-slate-400">
-                  Backend resolves the matching users and reports successful
-                  requests as sent
+                  Backend tracks notification lifecycle as process, queue, and
+                  sent
                 </span>
               </div>
 

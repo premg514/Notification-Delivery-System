@@ -7,6 +7,19 @@ import { getRecentNotifications, type RecentNotification } from "@/lib/api";
 const PAGE_SIZE = 10;
 const MAX_FETCH_LIMIT = 1000;
 
+function getStatusClasses(status: string): string {
+  switch (status) {
+    case "process":
+      return "bg-sky-50 text-sky-700";
+    case "queue":
+      return "bg-amber-50 text-amber-700";
+    case "sent":
+      return "bg-emerald-50 text-emerald-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
@@ -130,7 +143,7 @@ export default function NotificationsPage(): JSX.Element {
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase text-slate-600">
                   {notification.target_department}
                 </span>
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase text-emerald-700">
+                <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${getStatusClasses(notification.status)}`}>
                   {notification.status}
                 </span>
               </div>
@@ -175,7 +188,7 @@ export default function NotificationsPage(): JSX.Element {
                   </td>
                   <td className="hidden px-4 py-4 uppercase md:table-cell">{notification.priority}</td>
                   <td className="px-4 py-4">
-                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase text-emerald-700">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${getStatusClasses(notification.status)}`}>
                       {notification.status}
                     </span>
                   </td>
