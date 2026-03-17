@@ -9,4 +9,6 @@ type Delivery struct {
 	Status         string
 	RetryCount     int
 	DeliveredAt    *time.Time
+	LastError      string
+	UpdatedAt      time.Time
 }

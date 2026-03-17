@@ -1,42 +1,96 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
-var clients = make(map[string]time.Time)
-var mu sync.Mutex
+type visitor struct {
+	count     int
+	windowEnd time.Time
+}
 
-func RateLimiter() gin.HandlerFunc {
+type RateLimiter struct {
+	limit int
+	mu    sync.Mutex
+	store map[string]*visitor
+}
 
-	return func(c *gin.Context) {
+func NewRateLimiter(limit int) *RateLimiter {
+	rl := &RateLimiter{
+		limit: limit,
+		store: make(map[string]*visitor),
+	}
 
-		ip := c.ClientIP()
+	go rl.cleanupLoop()
 
-		mu.Lock()
+	return rl
+}
 
-		lastRequest, exists := clients[ip]
-
-		if exists && time.Since(lastRequest) < time.Second {
-
-			mu.Unlock()
-
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error": "Too many requests",
-			})
-
-			c.Abort()
+func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !rl.allow(clientIP(r)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limit exceeded"}`))
 			return
 		}
 
-		clients[ip] = time.Now()
+		next.ServeHTTP(w, r)
+	})
+}
 
-		mu.Unlock()
+func (rl *RateLimiter) allow(key string) bool {
+	now := time.Now()
 
-		c.Next()
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	entry, exists := rl.store[key]
+	if !exists || now.After(entry.windowEnd) {
+		rl.store[key] = &visitor{
+			count:     1,
+			windowEnd: now.Add(time.Minute),
+		}
+		return true
 	}
+
+	if entry.count >= rl.limit {
+		return false
+	}
+
+	entry.count++
+	return true
+}
+
+func (rl *RateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+
+		rl.mu.Lock()
+		for key, entry := range rl.store {
+			if now.After(entry.windowEnd) {
+				delete(rl.store, key)
+			}
+		}
+		rl.mu.Unlock()
+	}
+}
+
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		return forwarded
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+
+	return host
 }

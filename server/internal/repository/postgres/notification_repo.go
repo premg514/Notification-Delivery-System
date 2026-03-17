@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"notification-system/internal/domain/models"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,19 +20,81 @@ func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 
 // Create a notification
 func (r *NotificationRepository) CreateNotification(ctx context.Context, n models.Notification) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC())
+	return err
+}
 
-	query := `
-	INSERT INTO notifications (id, title, message)
-	VALUES ($1, $2, $3)
-	`
+func (r *NotificationRepository) CreateNotificationIfAbsent(ctx context.Context, n models.Notification) (models.Notification, bool, error) {
+	var notification models.Notification
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (idempotency_key)
+		DO UPDATE SET idempotency_key = notifications.idempotency_key
+		RETURNING id, title, message, priority, COALESCE(idempotency_key, ''), created_at
+	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()).Scan(
+		&notification.ID,
+		&notification.Title,
+		&notification.Message,
+		&notification.Priority,
+		&notification.IdempotencyKey,
+		&notification.CreatedAt,
+	)
+	if err != nil {
+		return models.Notification{}, false, err
+	}
 
-	_, err := r.db.Exec(ctx, query, n.ID, n.Title, n.Message)
+	return notification, notification.ID == n.ID, nil
+}
 
+func (r *NotificationRepository) CreateNotificationWithDeliveries(ctx context.Context, n models.Notification, deliveries []models.Delivery) (err error) {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
-	return nil
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()); err != nil {
+		return err
+	}
+
+	if len(deliveries) > 0 {
+		rows := make([][]any, 0, len(deliveries))
+		for _, delivery := range deliveries {
+			rows = append(rows, []any{
+				delivery.ID,
+				delivery.UserID,
+				delivery.NotificationID,
+				delivery.Status,
+				delivery.RetryCount,
+				delivery.DeliveredAt,
+				nullableString(delivery.LastError),
+				delivery.UpdatedAt.UTC(),
+			})
+		}
+
+		_, err = tx.CopyFrom(
+			ctx,
+			pgx.Identifier{"deliveries"},
+			[]string{"id", "user_id", "notification_id", "status", "retry_count", "delivered_at", "last_error", "updated_at"},
+			pgx.CopyFromRows(rows),
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 // Fetch notification by ID
@@ -42,58 +107,170 @@ func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id str
 	`
 
 	var notification models.Notification
-
-	err := r.db.QueryRow(ctx, query, id).Scan(
+	err := r.db.QueryRow(ctx, `
+		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at
+		FROM notifications
+		WHERE id = $1
+	`, id).Scan(
 		&notification.ID,
 		&notification.Title,
 		&notification.Message,
+		&notification.Priority,
+		&notification.IdempotencyKey,
 		&notification.CreatedAt,
 	)
+	return notification, err
+}
 
-	if err != nil {
+func (r *NotificationRepository) GetNotificationByIdempotencyKey(ctx context.Context, key string) (models.Notification, error) {
+	var notification models.Notification
+	err := r.db.QueryRow(ctx, `
+		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at
+		FROM notifications
+		WHERE idempotency_key = $1
+	`, key).Scan(
+		&notification.ID,
+		&notification.Title,
+		&notification.Message,
+		&notification.Priority,
+		&notification.IdempotencyKey,
+		&notification.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Notification{}, err
 	}
-
-	return notification, nil
+	return notification, err
 }
 
 // Update delivery status
 func (r *NotificationRepository) UpdateDeliveryStatus(ctx context.Context, deliveryID string, status string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE deliveries
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`, deliveryID, status)
+	return err
+}
 
-	query := `
-	UPDATE deliveries
-	SET status = $1
-	WHERE id = $2
-	`
-
-	_, err := r.db.Exec(ctx, query, status, deliveryID)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (r *NotificationRepository) UpdateDeliveryStatusWithRetry(ctx context.Context, deliveryID string, status string, retryCount int, deliveredAt *time.Time, lastError string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE deliveries
+		SET status = $2,
+			retry_count = $3,
+			delivered_at = $4,
+			last_error = $5,
+			updated_at = NOW()
+		WHERE id = $1
+	`, deliveryID, status, retryCount, deliveredAt, nullableString(lastError))
+	return err
 }
 
 // Create delivery record
 func (r *NotificationRepository) CreateDeliveryRecord(ctx context.Context, d models.Delivery) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO deliveries (id, user_id, notification_id, status, retry_count, delivered_at, last_error, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, d.ID, d.UserID, d.NotificationID, d.Status, d.RetryCount, d.DeliveredAt, nullableString(d.LastError), d.UpdatedAt.UTC())
+	return err
+}
 
-	query := `
-	INSERT INTO deliveries (id, user_id, notification_id, status, retry_count)
-	VALUES ($1, $2, $3, $4, $5)
-	`
-
-	_, err := r.db.Exec(ctx, query,
-		d.ID,
-		d.UserID,
-		d.NotificationID,
-		d.Status,
-		d.RetryCount,
-	)
-
-	if err != nil {
-		return err
+func (r *NotificationRepository) CreateDeliveriesIfAbsent(ctx context.Context, deliveries []models.Delivery) ([]models.Delivery, error) {
+	if len(deliveries) == 0 {
+		return nil, nil
 	}
 
-	return nil
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if _, err = tx.Exec(ctx, `
+		CREATE TEMP TABLE delivery_stage (
+			id UUID,
+			user_id UUID,
+			notification_id UUID,
+			status TEXT,
+			retry_count INT,
+			delivered_at TIMESTAMP,
+			last_error TEXT,
+			updated_at TIMESTAMP
+		) ON COMMIT DROP
+	`); err != nil {
+		return nil, err
+	}
+
+	rows := make([][]any, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		rows = append(rows, []any{
+			delivery.ID,
+			delivery.UserID,
+			delivery.NotificationID,
+			delivery.Status,
+			delivery.RetryCount,
+			delivery.DeliveredAt,
+			nullableString(delivery.LastError),
+			delivery.UpdatedAt.UTC(),
+		})
+	}
+
+	if _, err = tx.CopyFrom(
+		ctx,
+		pgx.Identifier{"delivery_stage"},
+		[]string{"id", "user_id", "notification_id", "status", "retry_count", "delivered_at", "last_error", "updated_at"},
+		pgx.CopyFromRows(rows),
+	); err != nil {
+		return nil, err
+	}
+
+	insertedRows, err := tx.Query(ctx, `
+		INSERT INTO deliveries (id, user_id, notification_id, status, retry_count, delivered_at, last_error, updated_at)
+		SELECT id, user_id, notification_id, status, retry_count, delivered_at, last_error, updated_at
+		FROM delivery_stage
+		ON CONFLICT (notification_id, user_id) DO NOTHING
+		RETURNING id, user_id, notification_id, status, retry_count, delivered_at, COALESCE(last_error, ''), updated_at
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer insertedRows.Close()
+
+	inserted := make([]models.Delivery, 0, len(deliveries))
+	for insertedRows.Next() {
+		var delivery models.Delivery
+		if scanErr := insertedRows.Scan(
+			&delivery.ID,
+			&delivery.UserID,
+			&delivery.NotificationID,
+			&delivery.Status,
+			&delivery.RetryCount,
+			&delivery.DeliveredAt,
+			&delivery.LastError,
+			&delivery.UpdatedAt,
+		); scanErr != nil {
+			err = scanErr
+			return nil, err
+		}
+		inserted = append(inserted, delivery)
+	}
+	if err = insertedRows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return inserted, nil
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
