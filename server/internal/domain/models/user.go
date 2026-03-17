@@ -6,5 +6,6 @@ type User struct {
 	ID          string
 	Email       string
 	DeviceToken string
+	Department  Department
 	CreatedAt   time.Time
 }

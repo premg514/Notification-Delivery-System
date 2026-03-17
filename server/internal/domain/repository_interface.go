@@ -11,7 +11,9 @@ type NotificationRepository interface {
 	CreateNotificationWithDeliveries(ctx context.Context, n models.Notification, deliveries []models.Delivery) error
 	GetNotificationByID(ctx context.Context, id string) (models.Notification, error)
 	GetNotificationByIdempotencyKey(ctx context.Context, key string) (models.Notification, error)
+	ListRecentNotifications(ctx context.Context, limit int) ([]models.Notification, error)
 	CreateNotificationIfAbsent(ctx context.Context, n models.Notification) (models.Notification, bool, error)
+	ListUserIDsByDepartment(ctx context.Context, department models.Department) ([]string, error)
 	UpdateDeliveryStatus(ctx context.Context, deliveryID string, status string) error
 	UpdateDeliveryStatusWithRetry(ctx context.Context, deliveryID string, status string, retryCount int, deliveredAt *time.Time, lastError string) error
 	CreateDeliveryRecord(ctx context.Context, d models.Delivery) error

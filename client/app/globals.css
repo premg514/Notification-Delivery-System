@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --paper: #f5f7fb;
+  --panel: rgba(255, 255, 255, 0.82);
+  --stroke: rgba(15, 23, 47, 0.08);
+  --ink: #0f172f;
+  --muted: #748098;
+  --coral: #ff4530;
+  --coral-deep: #e31f16;
+  --mint: #1fa971;
+  --amber: #d19b0f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top right, rgba(255, 214, 177, 0.45), transparent 22%),
+    radial-gradient(circle at left 15%, rgba(255, 69, 48, 0.08), transparent 18%),
+    linear-gradient(180deg, #fffaf6 0%, var(--paper) 24%, #edf1f8 100%);
+  color: var(--ink);
+  font-family: "Segoe UI Variable", Aptos, "Trebuchet MS", sans-serif;
+}
+
+.site-brand {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(12px);
+}
+
+.site-brand-inner {
+  margin: 0 auto;
+  display: flex;
+  max-width: 1280px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.site-brand-link {
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+}
+
+.site-brand-subtitle {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.panel {
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--stroke);
+}
+
+.data-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+@media (max-width: 960px) {
+  .data-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .data-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .site-brand-inner {
+    padding: 0.65rem 0.9rem;
+  }
+
+  .site-brand-link {
+    font-size: 1.2rem;
+  }
+
+  .site-brand-subtitle {
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+  }
+}

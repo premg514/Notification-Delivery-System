@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"notification-system/internal/domain"
 	"notification-system/internal/domain/models"
 	"strings"
@@ -17,18 +18,21 @@ type QueuePublisher interface {
 	PublishFanout(ctx context.Context, job models.FanoutJob) error
 }
 
+var ErrNoUsersInDepartment = errors.New("no users found for target department")
+
 type CreateNotificationInput struct {
-	Title          string
-	Message        string
-	TargetUserIDs  []string
-	Priority       string
-	IdempotencyKey string
+	Title            string
+	Message          string
+	TargetDepartment models.Department
+	Priority         string
+	IdempotencyKey   string
 }
 
 type CreateNotificationResult struct {
 	NotificationID   string    `json:"notification_id"`
 	Status           string    `json:"status"`
 	QueuedDeliveries int       `json:"queued_deliveries"`
+	TargetDepartment string    `json:"target_department"`
 	Duplicate        bool      `json:"duplicate"`
 	CreatedAt        time.Time `json:"created_at"`
 }
@@ -52,14 +56,22 @@ func (s *NotificationService) QueueNotification(ctx context.Context, input Creat
 	}
 
 	now := time.Now().UTC()
-	userIDs := dedupeUserIDs(input.TargetUserIDs)
+	userIDs, err := s.repo.ListUserIDsByDepartment(ctx, input.TargetDepartment)
+	if err != nil {
+		return CreateNotificationResult{}, err
+	}
+	if len(userIDs) == 0 {
+		return CreateNotificationResult{}, ErrNoUsersInDepartment
+	}
+
 	notification, created, err := s.repo.CreateNotificationIfAbsent(ctx, models.Notification{
-		ID:             NewID(),
-		Title:          strings.TrimSpace(input.Title),
-		Message:        strings.TrimSpace(input.Message),
-		Priority:       normalizePriority(input.Priority),
-		IdempotencyKey: idempotencyKey,
-		CreatedAt:      now,
+		ID:               NewID(),
+		Title:            strings.TrimSpace(input.Title),
+		Message:          strings.TrimSpace(input.Message),
+		TargetDepartment: input.TargetDepartment,
+		Priority:         normalizePriority(input.Priority),
+		IdempotencyKey:   idempotencyKey,
+		CreatedAt:        now,
 	})
 	if err != nil {
 		return CreateNotificationResult{}, err
@@ -68,49 +80,64 @@ func (s *NotificationService) QueueNotification(ctx context.Context, input Creat
 	if !created {
 		return CreateNotificationResult{
 			NotificationID:   notification.ID,
-			Status:           "already_queued",
+			Status:           "already_sent",
 			QueuedDeliveries: len(userIDs),
+			TargetDepartment: string(input.TargetDepartment),
 			Duplicate:        true,
 			CreatedAt:        notification.CreatedAt,
 		}, nil
 	}
 
 	if err := s.publisher.PublishFanout(ctx, models.FanoutJob{
-		NotificationID: notification.ID,
-		Title:          notification.Title,
-		Message:        notification.Message,
-		Priority:       notification.Priority,
-		TargetUserIDs:  userIDs,
-		IdempotencyKey: idempotencyKey,
+		NotificationID:   notification.ID,
+		Title:            notification.Title,
+		Message:          notification.Message,
+		Priority:         notification.Priority,
+		TargetDepartment: input.TargetDepartment,
+		IdempotencyKey:   idempotencyKey,
 	}); err != nil {
 		return CreateNotificationResult{}, err
 	}
 
 	return CreateNotificationResult{
 		NotificationID:   notification.ID,
-		Status:           "queued",
+		Status:           "sent",
 		QueuedDeliveries: len(userIDs),
+		TargetDepartment: string(input.TargetDepartment),
 		CreatedAt:        notification.CreatedAt,
 	}, nil
 }
 
-func dedupeUserIDs(userIDs []string) []string {
-	seen := make(map[string]struct{}, len(userIDs))
-	result := make([]string, 0, len(userIDs))
+type RecentNotification struct {
+	ID               string    `json:"id"`
+	Title            string    `json:"title"`
+	TargetDepartment string    `json:"target_department"`
+	Priority         string    `json:"priority"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+	QueuedDeliveries int       `json:"queued_deliveries"`
+}
 
-	for _, userID := range userIDs {
-		trimmed := strings.TrimSpace(userID)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		result = append(result, trimmed)
+func (s *NotificationService) ListRecentNotifications(ctx context.Context, limit int) ([]RecentNotification, error) {
+	notifications, err := s.repo.ListRecentNotifications(ctx, limit)
+	if err != nil {
+		return nil, err
 	}
 
-	return result
+	result := make([]RecentNotification, 0, len(notifications))
+	for _, notification := range notifications {
+		result = append(result, RecentNotification{
+			ID:               notification.ID,
+			Title:            notification.Title,
+			TargetDepartment: string(notification.TargetDepartment),
+			Priority:         notification.Priority,
+			Status:           "sent",
+			CreatedAt:        notification.CreatedAt,
+			QueuedDeliveries: notification.QueuedDeliveries,
+		})
+	}
+
+	return result, nil
 }
 
 func normalizePriority(priority string) string {

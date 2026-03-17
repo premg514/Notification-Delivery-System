@@ -19,6 +19,7 @@ func NewRouter(notificationHandler *handlers.NotificationHandler, rateLimiter *m
 	api := router.Group("/")
 	api.Use(rateLimiter.Middleware())
 	api.POST("/send-notification", notificationHandler.SendNotification)
+	api.GET("/notifications/recent", notificationHandler.ListRecentNotifications)
 
 	return router
 }

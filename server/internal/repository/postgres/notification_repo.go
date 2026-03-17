@@ -21,24 +21,25 @@ func NewNotificationRepository(db *pgxpool.Pool) *NotificationRepository {
 // Create a notification
 func (r *NotificationRepository) CreateNotification(ctx context.Context, n models.Notification) error {
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC())
+		INSERT INTO notifications (id, title, message, target_department, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, n.ID, n.Title, n.Message, string(n.TargetDepartment), n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC())
 	return err
 }
 
 func (r *NotificationRepository) CreateNotificationIfAbsent(ctx context.Context, n models.Notification) (models.Notification, bool, error) {
 	var notification models.Notification
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO notifications (id, title, message, target_department, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (idempotency_key)
 		DO UPDATE SET idempotency_key = notifications.idempotency_key
-		RETURNING id, title, message, priority, COALESCE(idempotency_key, ''), created_at
-	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()).Scan(
+		RETURNING id, title, message, target_department, priority, COALESCE(idempotency_key, ''), created_at
+	`, n.ID, n.Title, n.Message, string(n.TargetDepartment), n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()).Scan(
 		&notification.ID,
 		&notification.Title,
 		&notification.Message,
+		&notification.TargetDepartment,
 		&notification.Priority,
 		&notification.IdempotencyKey,
 		&notification.CreatedAt,
@@ -62,9 +63,9 @@ func (r *NotificationRepository) CreateNotificationWithDeliveries(ctx context.Co
 	}()
 
 	if _, err = tx.Exec(ctx, `
-		INSERT INTO notifications (id, title, message, priority, idempotency_key, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, n.ID, n.Title, n.Message, n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()); err != nil {
+		INSERT INTO notifications (id, title, message, target_department, priority, idempotency_key, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, n.ID, n.Title, n.Message, string(n.TargetDepartment), n.Priority, nullableString(n.IdempotencyKey), n.CreatedAt.UTC()); err != nil {
 		return err
 	}
 
@@ -101,13 +102,14 @@ func (r *NotificationRepository) CreateNotificationWithDeliveries(ctx context.Co
 func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id string) (models.Notification, error) {
 	var notification models.Notification
 	err := r.db.QueryRow(ctx, `
-		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at
+		SELECT id, title, message, target_department, priority, COALESCE(idempotency_key, ''), created_at
 		FROM notifications
 		WHERE id = $1
 	`, id).Scan(
 		&notification.ID,
 		&notification.Title,
 		&notification.Message,
+		&notification.TargetDepartment,
 		&notification.Priority,
 		&notification.IdempotencyKey,
 		&notification.CreatedAt,
@@ -118,13 +120,14 @@ func (r *NotificationRepository) GetNotificationByID(ctx context.Context, id str
 func (r *NotificationRepository) GetNotificationByIdempotencyKey(ctx context.Context, key string) (models.Notification, error) {
 	var notification models.Notification
 	err := r.db.QueryRow(ctx, `
-		SELECT id, title, message, priority, COALESCE(idempotency_key, ''), created_at
+		SELECT id, title, message, target_department, priority, COALESCE(idempotency_key, ''), created_at
 		FROM notifications
 		WHERE idempotency_key = $1
 	`, key).Scan(
 		&notification.ID,
 		&notification.Title,
 		&notification.Message,
+		&notification.TargetDepartment,
 		&notification.Priority,
 		&notification.IdempotencyKey,
 		&notification.CreatedAt,
@@ -133,6 +136,85 @@ func (r *NotificationRepository) GetNotificationByIdempotencyKey(ctx context.Con
 		return models.Notification{}, err
 	}
 	return notification, err
+}
+
+func (r *NotificationRepository) ListRecentNotifications(ctx context.Context, limit int) ([]models.Notification, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			n.id,
+			n.title,
+			n.message,
+			n.target_department,
+			n.priority,
+			COALESCE(n.idempotency_key, ''),
+			n.created_at,
+			COUNT(d.id)::INT AS queued_deliveries
+		FROM notifications n
+		LEFT JOIN deliveries d ON d.notification_id = n.id
+		GROUP BY n.id, n.title, n.message, n.target_department, n.priority, n.idempotency_key, n.created_at
+		ORDER BY n.created_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	notifications := make([]models.Notification, 0, limit)
+	for rows.Next() {
+		var notification models.Notification
+		if err := rows.Scan(
+			&notification.ID,
+			&notification.Title,
+			&notification.Message,
+			&notification.TargetDepartment,
+			&notification.Priority,
+			&notification.IdempotencyKey,
+			&notification.CreatedAt,
+			&notification.QueuedDeliveries,
+		); err != nil {
+			return nil, err
+		}
+		notifications = append(notifications, notification)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return notifications, nil
+}
+
+func (r *NotificationRepository) ListUserIDsByDepartment(ctx context.Context, department models.Department) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id
+		FROM users
+		WHERE department = $1
+		ORDER BY created_at, id
+	`, string(department))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	userIDs := make([]string, 0)
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		userIDs = append(userIDs, userID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return userIDs, nil
 }
 
 // Update delivery status

@@ -1,25 +1,13 @@
 import http from "k6/http";
 import { check } from "k6";
-import { SharedArray } from "k6/data";
 import { Counter, Trend } from "k6/metrics";
 
 const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
 const SCENARIO = (__ENV.SCENARIO || "baseline").toLowerCase();
-const TARGET_USERS_PER_REQUEST = Number(__ENV.TARGET_USERS_PER_REQUEST || 50);
 const TEST_RUN_ID = __ENV.TEST_RUN_ID || "local";
 const MAX_RESPONSE_MS = Number(__ENV.MAX_RESPONSE_MS || 1000);
 const MAX_ERROR_RATE = Number(__ENV.MAX_ERROR_RATE || 0.02);
-
-const users = new SharedArray("users", function () {
-  const raw = open("../data/users.json");
-  const parsed = JSON.parse(raw);
-
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error("data/users.json must be a non-empty JSON array of user UUID strings");
-  }
-
-  return parsed;
-});
+const DEPARTMENTS = ["CSE", "ECE", "ME", "CIVIL", "EEE"];
 
 const scenarios = {
   smoke: {
@@ -72,26 +60,11 @@ export const options = {
   summaryTrendStats: ["avg", "min", "med", "p(90)", "p(95)", "max"],
 };
 
-function pickTargetUsers(iteration, count) {
-  if (count <= 0) {
-    return [];
-  }
-
-  const result = [];
-  const start = (iteration * count) % users.length;
-  for (let i = 0; i < count; i += 1) {
-    result.push(users[(start + i) % users.length]);
-  }
-  return result;
-}
-
 function buildPayload(iteration) {
-  const targetUsers = pickTargetUsers(iteration, TARGET_USERS_PER_REQUEST);
-
   return {
     title: `Load Test Notification ${iteration}`,
     message: "Training session starts tomorrow at 9 AM.",
-    target_users: targetUsers,
+    target_department: DEPARTMENTS[iteration % DEPARTMENTS.length],
     priority: iteration % 10 === 0 ? "high" : "normal",
   };
 }

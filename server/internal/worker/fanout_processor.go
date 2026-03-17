@@ -36,12 +36,17 @@ func NewFanoutProcessor(repo domain.NotificationRepository, publisher DeliveryBa
 }
 
 func (p *FanoutProcessor) Process(ctx context.Context, job models.FanoutJob) error {
+	userIDs, err := p.repo.ListUserIDsByDepartment(ctx, job.TargetDepartment)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC()
-	for start := 0; start < len(job.TargetUserIDs); start += p.fanoutBatchSize {
-		end := min(start+p.fanoutBatchSize, len(job.TargetUserIDs))
+	for start := 0; start < len(userIDs); start += p.fanoutBatchSize {
+		end := min(start+p.fanoutBatchSize, len(userIDs))
 		deliveries := make([]models.Delivery, 0, end-start)
 
-		for _, userID := range job.TargetUserIDs[start:end] {
+		for _, userID := range userIDs[start:end] {
 			deliveries = append(deliveries, models.Delivery{
 				ID:             service.NewID(),
 				UserID:         userID,

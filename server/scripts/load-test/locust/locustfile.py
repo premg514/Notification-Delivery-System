@@ -1,45 +1,16 @@
-import json
 import logging
 import os
 import random
 import time
 import uuid
-from pathlib import Path
 
 from locust import HttpUser, between, events, task
 
-ROOT = Path(__file__).resolve().parent.parent
-USERS_FILE = ROOT / "data" / "users.json"
-
-TARGET_USERS_PER_REQUEST = max(1, int(os.getenv("TARGET_USERS_PER_REQUEST", "50")))
 MIN_WAIT_MS = max(0, int(os.getenv("MIN_WAIT_MS", "50")))
 MAX_WAIT_MS = max(MIN_WAIT_MS, int(os.getenv("MAX_WAIT_MS", "250")))
 REQUEST_TIMEOUT_SECONDS = max(1, int(os.getenv("REQUEST_TIMEOUT_SECONDS", "15")))
 TEST_RUN_ID = os.getenv("TEST_RUN_ID", "local")
-
-
-def _load_users():
-    if not USERS_FILE.exists():
-        raise FileNotFoundError(
-            f"Missing user data file: {USERS_FILE}. "
-            "Create it as a JSON array of user UUID strings."
-        )
-
-    data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
-    if not isinstance(data, list) or len(data) == 0:
-        raise ValueError(f"{USERS_FILE} must contain a non-empty JSON array")
-
-    return data
-
-
-USER_IDS = _load_users()
-
-
-def pick_target_users():
-    if TARGET_USERS_PER_REQUEST >= len(USER_IDS):
-        return USER_IDS.copy()
-
-    return random.sample(USER_IDS, TARGET_USERS_PER_REQUEST)
+DEPARTMENTS = ["CSE", "ECE", "ME", "CIVIL", "EEE"]
 
 
 class NotificationUser(HttpUser):
@@ -47,7 +18,6 @@ class NotificationUser(HttpUser):
 
     @task
     def send_notification(self):
-        target_users = pick_target_users()
         iteration = int(time.time() * 1000)
         runner = self.environment.runner
         active_users = runner.user_count if runner is not None else 0
@@ -59,7 +29,7 @@ class NotificationUser(HttpUser):
         payload = {
             "title": f"Load Test Notification {iteration}",
             "message": "Training session starts tomorrow at 9 AM.",
-            "target_users": target_users,
+            "target_department": random.choice(DEPARTMENTS),
             "priority": "high" if random.random() < 0.1 else "normal",
         }
 
@@ -88,4 +58,4 @@ class NotificationUser(HttpUser):
 
 @events.test_start.add_listener
 def on_test_start(environment, **_kwargs):
-    logging.getLogger(__name__).info("Loaded %d user IDs for Locust run", len(USER_IDS))
+    logging.getLogger(__name__).info("Loaded %d departments for Locust run", len(DEPARTMENTS))

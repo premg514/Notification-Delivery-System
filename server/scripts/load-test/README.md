@@ -8,7 +8,6 @@ This folder contains production-oriented load testing assets for the Notificatio
 server/scripts/load-test/
   README.md
   data/
-    users.example.json
   k6/
     send_notification.js
   locust/
@@ -28,7 +27,7 @@ server/scripts/load-test/
 ## Prerequisites
 
 1. API, Redis, RabbitMQ, and Postgres are running.
-2. You have user UUIDs in the `users` table.
+2. You have seeded users across departments in the `users` table.
 3. Rate limiting is tuned for load tests.
 
 Recommended for load tests:
@@ -36,7 +35,7 @@ Recommended for load tests:
 - Increase `RATE_LIMIT_PER_MINUTE` significantly (or use a dedicated load-test environment).
 - Scale worker counts (`FANOUT_WORKER_COUNT`, `DELIVERY_WORKER_COUNT`) to realistic values.
 
-## Prepare User Data
+## Prepare Department Data
 
 Seed users if needed:
 
@@ -51,10 +50,10 @@ Export UUIDs into `server/scripts/load-test/data/users.json`:
 psql "$env:POSTGRES_URL" -At -f server/scripts/load-test/sql/export_users.sql > server/scripts/load-test/data/users.json
 ```
 
-`users.json` must be a JSON array of UUID strings, for example:
+This now exports a JSON array of department values, for example:
 
 ```json
-["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+["CIVIL", "CSE", "ECE", "EEE", "ME"]
 ```
 
 ## Run k6
@@ -77,7 +76,6 @@ Useful env vars:
 
 - `BASE_URL` (default: `http://localhost:8080`)
 - `SCENARIO` (default: `baseline`)
-- `TARGET_USERS_PER_REQUEST` (default: `50`)
 - `TEST_RUN_ID` (default: `local`)
 - `MAX_RESPONSE_MS` (default: `1000`)
 - `MAX_ERROR_RATE` (default: `0.02`)
@@ -107,7 +105,6 @@ locust -f locustfile.py --host http://localhost:8080 --headless --users 200 --sp
 
 Useful env vars:
 
-- `TARGET_USERS_PER_REQUEST` (default: `50`)
 - `MIN_WAIT_MS` (default: `50`)
 - `MAX_WAIT_MS` (default: `250`)
 - `REQUEST_TIMEOUT_SECONDS` (default: `15`)
