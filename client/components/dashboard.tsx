@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   getHealth,
   getRecentNotifications,
@@ -35,6 +41,9 @@ type DashboardMetrics = {
 
 const departments: Department[] = ["CSE", "ECE", "ME", "CIVIL", "EEE"];
 const priorities: Priority[] = ["high", "normal", "low"];
+const HEALTH_REVALIDATE_MS = 120000;
+const RECENT_REVALIDATE_MS = 180000;
+const ACTIVITY_LIMIT = 5;
 
 function buildIdempotencyKey(): string {
   return `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -163,65 +172,99 @@ export default function Dashboard(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
 
-  useEffect((): (() => void) => {
-    let mounted = true;
+  const checkHealth = useCallback(async (): Promise<void> => {
+    try {
+      const result = await getHealth();
+      setHealth(result.status === "ok" ? "healthy" : "degraded");
+    } catch {
+      setHealth("offline");
+    }
+  }, []);
 
-    const pollHealth = async (): Promise<void> => {
-      try {
-        const result = await getHealth();
-        if (mounted) {
-          setHealth(result.status === "ok" ? "healthy" : "degraded");
-        }
-      } catch {
-        if (mounted) {
-          setHealth("offline");
-        }
-      }
-    };
-
-    void pollHealth();
-    const timerId = window.setInterval(() => {
-      void pollHealth();
-    }, 10000);
-
-    return (): void => {
-      mounted = false;
-      window.clearInterval(timerId);
-    };
+  const refreshRecentNotifications = useCallback(async (): Promise<void> => {
+    try {
+      const notifications = await getRecentNotifications(ACTIVITY_LIMIT);
+      setActivity(
+        notifications.map((notification) =>
+          buildActivityItemFromRecentNotification(notification),
+        ),
+      );
+    } catch {
+      setActivity([]);
+    }
   }, []);
 
   useEffect((): (() => void) => {
-    let mounted = true;
+    let active = true;
 
-    const loadRecentNotifications = async (): Promise<void> => {
-      try {
-        const notifications = await getRecentNotifications(5);
-        if (!mounted) {
-          return;
-        }
+    const safeCheckHealth = async (): Promise<void> => {
+      if (!active) {
+        return;
+      }
+      await checkHealth();
+    };
 
-        setActivity(
-          notifications.map((notification) =>
-            buildActivityItemFromRecentNotification(notification),
-          ),
-        );
-      } catch {
-        if (mounted) {
-          setActivity([]);
-        }
+    void safeCheckHealth();
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        void safeCheckHealth();
       }
     };
+    const onOnline = (): void => {
+      void safeCheckHealth();
+    };
 
-    void loadRecentNotifications();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onOnline);
+
     const timerId = window.setInterval(() => {
-      void loadRecentNotifications();
-    }, 3000);
+      void safeCheckHealth();
+    }, HEALTH_REVALIDATE_MS);
 
     return (): void => {
-      mounted = false;
+      active = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onOnline);
       window.clearInterval(timerId);
     };
-  }, []);
+  }, [checkHealth]);
+
+  useEffect((): (() => void) => {
+    let active = true;
+
+    const safeRefreshRecentNotifications = async (): Promise<void> => {
+      if (!active) {
+        return;
+      }
+      await refreshRecentNotifications();
+    };
+
+    void safeRefreshRecentNotifications();
+
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        void safeRefreshRecentNotifications();
+      }
+    };
+    const onOnline = (): void => {
+      void safeRefreshRecentNotifications();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onOnline);
+
+    const timerId = window.setInterval(() => {
+      void safeRefreshRecentNotifications();
+    }, RECENT_REVALIDATE_MS);
+
+    return (): void => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onOnline);
+      window.clearInterval(timerId);
+    };
+  }, [refreshRecentNotifications]);
 
   const metrics = useMemo<DashboardMetrics>(() => {
     const totalSent = activity.reduce((sum, item) => sum + item.recipients, 0);
@@ -268,7 +311,8 @@ export default function Dashboard(): JSX.Element {
         priority,
         department,
       );
-      setActivity((current) => [nextItem, ...current].slice(0, 5));
+      setActivity((current) => [nextItem, ...current].slice(0, ACTIVITY_LIMIT));
+      void refreshRecentNotifications();
       setFlash(
         nextItem.status === "duplicate"
           ? `Existing idempotency key detected. ${department} reused the previous sent notification.`
@@ -294,47 +338,22 @@ export default function Dashboard(): JSX.Element {
             submissionMessage,
           ),
           ...current,
-        ].slice(0, 5),
+        ].slice(0, ACTIVITY_LIMIT),
       );
+      void checkHealth();
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="min-h-screen px-3 py-4 sm:px-6 lg:px-10">
+    <main className="min-h-screen px-3 py-4 sm:px-6 xl:px-10">
       <div className="mx-auto max-w-7xl">
-        {/* <header className="panel mb-8 rounded-[30px] px-5 py-5 shadow-panel sm:px-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-coral text-3xl font-black text-white shadow-soft">
-                A
-              </div>
-              <div>
-                <p className="font-display text-3xl uppercase tracking-tight text-ink">
-                  AGH
-                </p>
-                <p className="text-sm text-slate-500">
-                  Notification operations console
-                </p>
-              </div>
-            </div>
-
-            <nav className="flex flex-wrap items-center gap-4 text-sm font-semibold text-slate-400 sm:gap-6">
-              <span className="border-b-2 border-coral pb-2 text-ink">
-                Dashboard
-              </span>
-            </nav>
-
-            <div className="flex items-center gap-3 sm:gap-4" />
-          </div>
-        </header> */}
-
         <section className="mb-10">
           <p className="mb-3 inline-flex rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-slate-500 shadow-soft">
             Department delivery control
           </p>
-          <h1 className="font-display text-3xl leading-tight text-ink sm:text-5xl lg:text-6xl">
+          <h1 className="font-display text-3xl leading-tight text-ink sm:text-5xl xl:text-6xl">
             System Overview
           </h1>
           <p className="mt-3 max-w-2xl text-base text-slate-500 sm:text-lg">
@@ -389,28 +408,9 @@ export default function Dashboard(): JSX.Element {
               Most recent department send size
             </p>
           </article>
-
-          <article className="panel rounded-4xl p-6 shadow-panel">
-            <p className="mb-5 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-              Success rate
-            </p>
-            <div className="flex items-center gap-4">
-              <div className="grid h-20 w-20 place-items-center rounded-full border-[7px] border-coral text-2xl font-black text-ink">
-                {metrics.successRate}%
-              </div>
-              <div>
-                <div className="text-3xl font-black text-ink sm:text-4xl">
-                  {metrics.successRate}%
-                </div>
-                <p className="text-sm font-semibold text-slate-400">
-                  Backend-driven activity metric
-                </p>
-              </div>
-            </div>
-          </article>
         </section>
 
-        <section className="grid gap-8 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        <section className="grid gap-8 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
           <article className="panel rounded-[36px] shadow-panel">
             <div className="border-b border-slate-100 px-6 py-6 sm:px-8">
               <div className="flex items-center gap-4">
@@ -552,7 +552,7 @@ export default function Dashboard(): JSX.Element {
               </Link>
             </div>
 
-            <div className="space-y-3 p-4 md:hidden">
+            <div className="space-y-3 p-4 lg:hidden">
               {activity.map((item) => (
                 <article
                   key={item.id}
@@ -585,7 +585,7 @@ export default function Dashboard(): JSX.Element {
               ) : null}
             </div>
 
-            <div className="hidden overflow-x-auto md:block">
+            <div className="hidden overflow-x-auto lg:block">
               <table className="min-w-[560px] w-full border-separate border-spacing-0 text-left">
                 <thead>
                   <tr className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">

@@ -17,10 +17,21 @@ export default function RootLayout({
       <body>
         <header className="site-brand">
           <div className="site-brand-inner">
-            <Link href="/" className="site-brand-link">
-              AGH
-            </Link>
-            <span className="site-brand-subtitle">Notification Console</span>
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-coral text-3xl font-black text-white shadow-soft">
+                A
+              </div>
+              <div>
+                <p className="font-display text-3xl uppercase tracking-tight text-ink">
+                  AGH
+                </p>
+                <p className="text-sm text-slate-500">
+                  Notification operations console
+                </p>
+              </div>
+            </div>
+          </div>
           </div>
         </header>
         {children}

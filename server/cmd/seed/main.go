@@ -28,7 +28,7 @@ func main() {
 		log.Fatalf("database migration failed: %v", err)
 	}
 
-	userCount := 10000
+	userCount := 5000
 	departments := models.AllDepartments()
 	log.Printf("Seeding %d users into the database...", userCount)
 

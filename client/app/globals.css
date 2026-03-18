@@ -84,17 +84,17 @@ select {
 
 .data-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.25rem;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1200px) {
   .data-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px) {
   .data-grid {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -1,2 +1,0 @@
--- No-op migration.
--- The full schema is defined in the initial create migrations.
